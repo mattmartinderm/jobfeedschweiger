@@ -4,14 +4,14 @@ on:
   schedule:
     # Runs every day at 8:00 PM CST (CST = UTC-6)
     - cron: "0 2 * * *"
-  workflow_dispatch:  # allows manual run
+  workflow_dispatch:  # allows manual trigger in GitHub UI
 
 jobs:
   update-feed:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Python
