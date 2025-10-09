@@ -9,6 +9,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
+
 def setup_driver():
     """Set up a headless Firefox driver."""
     options = Options()
@@ -16,6 +17,7 @@ def setup_driver():
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     return webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+
 
 def scrape_workday_jobs():
     """Scrapes Schweiger Dermatology Workday job listings and saves to CSV."""
@@ -26,9 +28,14 @@ def scrape_workday_jobs():
 
     print("🌐 Opening Schweiger Dermatology Careers page...")
 
-    # Wait for job count text
+    # Wait for job count text (supports both selectors)
     try:
-        job_count_el = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "span[data-automation-id='jobCount']")))
+        job_count_el = wait.until(
+            EC.presence_of_any_elements_located([
+                (By.CSS_SELECTOR, "p[data-automation-id='jobFoundText']"),
+                (By.CSS_SELECTOR, "span[data-automation-id='jobCount']")
+            ])
+        )[0]
         job_count_text = job_count_el.text.strip()
         print(f"🔎 Job count text: {job_count_text}")
     except Exception:
@@ -115,8 +122,12 @@ def scrape_workday_jobs():
                 print(f"   ✅ Scraped job {total_jobs_scraped}: {title}...")
 
                 driver.back()
+                # Wait for job list to reappear before continuing
                 wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
                 time.sleep(1)
+
+                # Refresh job_links after going back
+                job_links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
 
             except Exception as e:
                 print(f"⚠️  Error scraping job {index}: {e}")
@@ -124,19 +135,26 @@ def scrape_workday_jobs():
                 time.sleep(2)
                 continue
 
-        # Pagination
+        # Pagination with page refresh detection
         try:
             next_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Next']")
             if next_button.is_enabled():
+                first_title_before = job_links[0].text.strip() if job_links else ""
                 driver.execute_script("arguments[0].click();", next_button)
                 page_num += 1
-                wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
+                print(f"⏭️ Moving to page {page_num}... Waiting for jobs to refresh...")
+
+                # Wait for a new job list to appear that differs from previous
+                wait.until(lambda d: (
+                    d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']") and
+                    d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")[0].text.strip() != first_title_before
+                ))
                 time.sleep(2)
             else:
                 print("⏹️ Reached last page or could not find next button.")
                 break
-        except:
-            print("⏹️ Reached last page or could not find next button.")
+        except Exception as e:
+            print(f"⏹️ Pagination ended or failed: {e}")
             break
 
     driver.quit()
@@ -145,6 +163,7 @@ def scrape_workday_jobs():
     df.to_csv("schweiger_jobs_formatted.csv", index=False, encoding="utf-8-sig")
     print(f"📦 Done! Scraped {total_jobs_scraped} jobs out of expected {job_count_text}.")
     print("💡 File saved as 'schweiger_jobs_formatted.csv' with full HTML formatting in descriptions.")
+
 
 if __name__ == "__main__":
     scrape_workday_jobs()
