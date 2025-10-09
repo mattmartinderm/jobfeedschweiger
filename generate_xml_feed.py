@@ -18,7 +18,7 @@ def generate_xml_from_csv(csv_file, xml_file):
         SubElement(job_el, "url").text = str(row.get("Job URL", ""))
         SubElement(job_el, "applyUrl").text = str(row.get("Apply URL", ""))
 
-        # Preserve HTML description inside CDATA
+        # Preserve HTML formatting inside CDATA
         desc_html = str(row.get("Description (HTML)", ""))
         desc_el = SubElement(job_el, "description")
         desc_el.text = f"<![CDATA[{desc_html}]]>"
