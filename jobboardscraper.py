@@ -1,21 +1,16 @@
-import time
-import pandas as pd
-import re
 from selenium import webdriver
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
-
 def setup_driver():
-    """Set up Firefox WebDriver."""
+    """Set up Firefox WebDriver (headless mode for GitHub Actions)."""
     options = Options()
+    options.add_argument("--headless")  # run in headless mode
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--width=1400")
     options.add_argument("--height=900")
-    options.add_argument("--disable-blink-features=AutomationControlled")
     driver = webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
     return driver
 
