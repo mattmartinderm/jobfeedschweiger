@@ -71,20 +71,23 @@ def collect_jobs():
     while True:
         log(f"📄 Scraping page {page}...")
         wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
-        links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
-        log(f"   Found {len(links)} jobs.")
+        job_cards = driver.find_elements(By.CSS_SELECTOR, "div[data-automation-id='compositeSubHeader']")
 
-        for link in links:
+        log(f"   Found {len(job_cards)} job cards.")
+        for card in job_cards:
             try:
-                job_title = link.text.strip()
-                job_href = link.get_attribute("href")
+                title_el = card.find_element(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
+                job_title = title_el.text.strip()
+                job_href = title_el.get_attribute("href")
                 job_id_match = re.search(r"([A-Za-z0-9-]+)$", job_href)
                 job_id = job_id_match.group(1) if job_id_match else "N/A"
 
-                # Grab location under same container
-                container = link.find_element(By.XPATH, "./ancestor::div[contains(@data-automation-id,'jobItem')]")
-                loc_el = container.find_element(By.CSS_SELECTOR, "[data-automation-id='locations']")
-                location = loc_el.text.strip() if loc_el else "N/A"
+                # new, robust location selector
+                try:
+                    loc_el = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='locations'] span")
+                    location = loc_el.text.strip()
+                except Exception:
+                    location = "N/A"
 
                 jobs.append({
                     "Job ID": job_id,
@@ -93,9 +96,8 @@ def collect_jobs():
                     "Job Link": job_href
                 })
                 log(f"   ▶️ {job_id} | {job_title} | {location}")
-
             except Exception as e:
-                log(f"    ⚠️ Error parsing a job: {e}")
+                log(f"    ⚠️ Error parsing a job card: {e}")
 
         # Pagination
         try:
@@ -105,7 +107,6 @@ def collect_jobs():
             page += 1
             log(f"⏭️ Navigating to page {page}...")
             next_btn.click()
-            wait.until(EC.staleness_of(links[0]))
             time.sleep(2)
         except Exception:
             break
@@ -120,51 +121,6 @@ def collect_jobs():
         json.dump(jobs, f, indent=2)
     log("💾 Saved as 'workday_jobs_list.json'. ✅")
     return jobs
-
-
-# ---------- Phase 2: Scrape each job’s details ----------
-def scrape_job_details(jobs):
-    driver = setup_driver()
-    results = []
-
-    for i, job in enumerate(jobs, 1):
-        link = job["Job Link"]
-        try:
-            log(f"🔗 ({i}/{len(jobs)}) Opening {link}")
-            driver.get(link)
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']"))
-            )
-
-            desc_html = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']").get_attribute("innerHTML")
-            posted = driver.find_element(By.CSS_SELECTOR, "span[data-automation-id='postedOn']").text.strip()
-            time_type = driver.find_element(By.CSS_SELECTOR, "span[data-automation-id='timeType']").text.strip()
-
-            job_data = {
-                "Job ID": job["Job ID"],
-                "Title": job["Title"],
-                "Location": job["Location"],
-                "Time Type": time_type,
-                "Posted On": posted,
-                "Job Link": job["Job Link"],
-                "Description": desc_html
-            }
-            results.append(job_data)
-            log(f"   ✅ Scraped {job['Title']}")
-        except Exception as e:
-            log(f"   ⚠️ Error scraping {link}: {e}")
-
-    driver.quit()
-
-    # Write to CSV
-    fieldnames = ["Job ID", "Title", "Location", "Time Type", "Posted On", "Job Link", "Description"]
-    with open("schweiger_jobs_formatted.csv", "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(results)
-
-    log(f"💾 Saved {len(results)} jobs to 'schweiger_jobs_formatted.csv'. ✅")
-    return results
 
 
 # ---------- Main ----------
