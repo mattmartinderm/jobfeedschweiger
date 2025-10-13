@@ -31,6 +31,16 @@ jobs:
         run: |
           python jobboardscraper.py
 
+      - name: Generate XML feed
+        run: |
+          python generate_xml_feed.py
+
+      - name: Move XML to root (for GitHub Pages)
+        run: |
+          if [ -f schweiger_jobs.xml ]; then
+            mv schweiger_jobs.xml ./schweiger_jobs.xml
+          fi
+
       - name: Commit and push updates
         run: |
           git config user.name "github-actions"
