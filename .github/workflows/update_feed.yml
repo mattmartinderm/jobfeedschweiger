@@ -35,16 +35,19 @@ jobs:
         run: |
           python generate_xml_feed.py
 
-      - name: Move XML to root (for GitHub Pages)
+      - name: Ensure XML feed exists
         run: |
-          if [ -f schweiger_jobs.xml ]; then
-            mv schweiger_jobs.xml ./schweiger_jobs.xml
+          if [ ! -f schweiger_jobs.xml ]; then
+            echo "⚠️ XML file not found!"
+            exit 1
           fi
+          echo "✅ XML file confirmed."
 
       - name: Commit and push updates
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add .
+          git add schweiger_jobs.xml || echo "No XML to add"
           git commit -m "Auto-update XML feed" || echo "No changes to commit"
           git push
+
