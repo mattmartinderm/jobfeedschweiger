@@ -24,10 +24,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install selenium pandas webdriver-manager
 
-      - name: Install Firefox and Geckodriver (Ubuntu 24.04 compatible)
+      - name: Install Firefox and Geckodriver (headless compatible)
         run: |
           sudo apt-get update
-          sudo snap install firefox
+          sudo apt-get install -y wget libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1 libasound2
+          # Install Firefox directly from Mozilla (not Snap)
+          FIREFOX_VERSION=$(curl -s https://product-details.mozilla.org/1.0/firefox_versions.json | grep -oP '"LATEST_FIREFOX_VERSION":\s*"\K[^"]+')
+          wget -O firefox.tar.bz2 "https://download.mozilla.org/?product=firefox-${FIREFOX_VERSION}-linux64&lang=en-US"
+          tar -xjf firefox.tar.bz2
+          sudo mv firefox /opt/firefox
+          sudo ln -s /opt/firefox/firefox /usr/local/bin/firefox
+          # Install latest Geckodriver
           GECKO_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | grep "tag_name" | cut -d '"' -f 4)
           wget https://github.com/mozilla/geckodriver/releases/download/$GECKO_VERSION/geckodriver-$GECKO_VERSION-linux64.tar.gz
           tar -xvzf geckodriver-$GECKO_VERSION-linux64.tar.gz
