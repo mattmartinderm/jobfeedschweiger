@@ -1,6 +1,8 @@
-import time
+import json
 import re
-import pandas as pd
+import csv
+import time
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service as FirefoxService
@@ -8,154 +10,218 @@ from selenium.webdriver.firefox.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
+from xml.etree.ElementTree import Element, SubElement, tostring, ElementTree
+
+
+def ts():
+    return datetime.now().strftime("%H:%M:%S")
 
 
 def setup_driver():
-    """Set up headless Firefox WebDriver for GitHub Actions."""
+    print(f"[{ts()}] 🧩 Setting up Firefox WebDriver...")
     options = Options()
-    options.add_argument("--headless")
+    # Comment this out if you want to watch the browser
+    # options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
     service = FirefoxService(GeckoDriverManager().install())
-    return webdriver.Firefox(service=service, options=options)
+    driver = webdriver.Firefox(service=service, options=options)
+    driver.set_page_load_timeout(60)
+    print(f"[{ts()}] ✅ WebDriver ready.")
+    return driver
 
 
-def scrape_workday_jobs():
-    """Scrape all job listings from Schweiger Dermatology's Workday site."""
-    driver = setup_driver()
-    wait = WebDriverWait(driver, 45)
+# ───────────────────────────────────────────────────────────────
+# ✅ PHASE 1 (unchanged)
+# ───────────────────────────────────────────────────────────────
+def collect_jobs():
     url = "https://schweigerderm.wd12.myworkdayjobs.com/en-US/SchweigerCareers"
+    driver = setup_driver()
+    wait = WebDriverWait(driver, 20)
+
+    print(f"[{ts()}] 🌐 Opening {url}")
     driver.get(url)
 
-    print("🌐 Opening Schweiger Dermatology Careers page...")
-
-    # Wait for total job count
-    job_count_text = None
-    for _ in range(5):
+    job_count_text = ""
+    for attempt in range(10):
         try:
-            count_elem = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h2[data-automation-id='jobCount']")))
-            job_count_text = count_elem.text.strip()
-            if job_count_text:
-                print(f"🔎 Job count text: {job_count_text}")
+            elem = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-automation-id='jobFoundText']"))
+            )
+            job_count_text = elem.text.strip()
+            if re.search(r"\d+", job_count_text):
+                print(f"[{ts()}] 🔍 Attempt {attempt+1}: jobFoundText = '{job_count_text}'")
                 break
-        except:
-            time.sleep(3)
+            else:
+                print(f"[{ts()}] ⏳ Attempt {attempt+1}: jobFoundText = '{job_count_text}'")
+            time.sleep(1)
+        except Exception as e:
+            print(f"[{ts()}] ⚠️ Attempt {attempt+1} failed: {e}")
+            time.sleep(1)
 
-    if not job_count_text:
-        print("⚠️ Could not find job count text. Continuing anyway.")
+    if not re.search(r"\d+", job_count_text):
+        print(f"[{ts()}] ⚠️ Could not parse numeric job count — defaulting to 0.")
+        total_jobs = 0
+    else:
+        total_jobs = int(re.search(r"(\d+)", job_count_text).group(1))
+    print(f"[{ts()}] 📊 Total jobs found: {total_jobs}")
 
-    # Wait for job list
-    print("⏳ Waiting for job titles to appear...")
     wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
-    time.sleep(2)
+    time.sleep(1)
 
-    jobs = []
-    page_num = 1
+    all_jobs = []
+    page = 1
+    seen_job_ids = set()
 
-    # Helper function to scrape all job cards on the current page
-    def scrape_page(page_number):
-        job_cards = driver.find_elements(By.CSS_SELECTOR, "li[data-automation-id='compositeJobPosting']")
-        print(f"📄 Scraping page {page_number}...")
-        print(f"   Found {len(job_cards)} jobs on this page.")
-
-        for i, card in enumerate(job_cards, start=1):
+    def scrape_page():
+        links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
+        print(f"[{ts()}] 📄 Scraping page {page} — found {len(links)} jobs.")
+        for i, link in enumerate(links, start=1):
             try:
-                title_elem = card.find_element(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
-                title = title_elem.text.strip()
-                job_link = title_elem.get_attribute("href")
-
-                # Extract job ID (e.g. R-12345)
-                job_id_match = re.search(r"(R-\d+)", job_link)
+                title = link.text.strip()
+                href = link.get_attribute("href")
+                job_id_match = re.search(r"(\d{3,5}-\d+|R-\d+)", href)
                 job_id = job_id_match.group(1) if job_id_match else "N/A"
 
-                # Extract location, time type, and posting date
-                location_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='locations']")
-                location = location_elem.text.strip() if location_elem else "N/A"
+                container = link.find_element(By.XPATH, "./ancestor::li[1]")
 
-                time_type_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='timeType']")
-                time_type = time_type_elem.text.strip() if time_type_elem else "N/A"
+                def safe(selector):
+                    try:
+                        return container.find_element(By.CSS_SELECTOR, selector).text.strip()
+                    except:
+                        return "N/A"
 
-                posted_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='postedOn']")
-                posted_on = posted_elem.text.strip() if posted_elem else "N/A"
+                location = safe("div[data-automation-id='locations']")
+                time_type = safe("div[data-automation-id='timeType']")
+                posted_on = safe("div[data-automation-id='postedOn']")
 
-                # Open detail page in a new tab
-                driver.execute_script("window.open(arguments[0]);", job_link)
-                driver.switch_to.window(driver.window_handles[-1])
-                wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']")))
-
-                desc_elem = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']")
-                description_html = desc_elem.get_attribute("outerHTML")
-
-                apply_link_elem = driver.find_element(By.CSS_SELECTOR, "a[data-automation-id='applyButton']")
-                apply_link = apply_link_elem.get_attribute("href")
-
-                jobs.append({
-                    "Job ID": job_id,
-                    "Title": title,
-                    "Location": location,
-                    "Time Type": time_type,
-                    "Posted On": posted_on,
-                    "Apply Link": apply_link,
-                    "Job Link": job_link,
-                    "Description": description_html
-                })
-
-                driver.close()
-                driver.switch_to.window(driver.window_handles[0])
-                print(f"   ✅ Scraped job {i}: {title}...")
+                job_data = {
+                    "jobid": job_id,
+                    "title": title,
+                    "location": location,
+                    "time_type": time_type,
+                    "posted_on": posted_on,
+                    "job_link": href,
+                }
+                all_jobs.append(job_data)
+                seen_job_ids.add(job_id)
+                print(f"   ▶️ {job_id} | {title} | {location}")
 
             except Exception as e:
-                print(f"   ⚠️ Error scraping job {i} on page {page_number}: {e}")
-                if len(driver.window_handles) > 1:
-                    driver.close()
-                    driver.switch_to.window(driver.window_handles[0])
+                print(f"   ⚠️ Error scraping job {i}: {e}")
 
-    # Scrape first page
-    scrape_page(page_num)
+    scrape_page()
 
-    # Pagination via numbered buttons
     try:
-        time.sleep(2)
-        wait.until(EC.presence_of_all_elements_located(
-            (By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
-        ))
         page_buttons = driver.find_elements(By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
         total_pages = len(page_buttons)
-        print(f"🧭 Detected {total_pages} pages of results.")
+        print(f"[{ts()}] 🧭 Detected {total_pages} pages total.")
 
         for p in range(2, total_pages + 1):
             try:
-                page_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, f"button[aria-label='page {p}']")))
-                first_title_before = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")[0].text.strip()
+                print(f"[{ts()}] ⏭️ Navigating to page {p}...")
+                button = WebDriverWait(driver, 10).until(
+                    EC.element_to_be_clickable((By.CSS_SELECTOR, f"button[aria-label='page {p}']"))
+                )
+                last_seen = list(seen_job_ids)
+                driver.execute_script("arguments[0].click();", button)
+                print(f"[{ts()}]    🔄 Clicked page {p}, waiting for new jobs...")
 
-                driver.execute_script("arguments[0].click();", page_button)
-                print(f"⏭️ Navigating to page {p}... Waiting for jobs to refresh...")
-
-                wait.until(lambda d: (
-                    d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']") and
-                    d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")[0].text.strip() != first_title_before
+                WebDriverWait(driver, 10).until(lambda d: any(
+                    (re.search(r"(\d{3,5}-\d+|R-\d+)", a.get_attribute("href")) and
+                     re.search(r"(\d{3,5}-\d+|R-\d+)", a.get_attribute("href")).group(1)) not in last_seen
+                    for a in d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
                 ))
-                time.sleep(2)
 
-                scrape_page(p)
-
+                time.sleep(1)
+                page = p
+                scrape_page()
             except Exception as e:
-                print(f"⚠️ Pagination failed at page {p}: {e}")
+                print(f"[{ts()}] ⚠️ Pagination failed on page {p}: {e}")
                 break
-
     except Exception as e:
-        print(f"⏹️ Pagination setup failed: {e}")
+        print(f"[{ts()}] ⚠️ Pagination setup failed: {e}")
 
     driver.quit()
+    print(f"[{ts()}] 📦 Done! Collected {len(all_jobs)} jobs total.")
+
+    with open("workday_jobs_list.json", "w", encoding="utf-8") as f:
+        json.dump(all_jobs, f, ensure_ascii=False, indent=2)
+    print(f"[{ts()}] 💾 Saved as 'workday_jobs_list.json'. ✅")
+
+    return all_jobs
+
+
+# ───────────────────────────────────────────────────────────────
+# ✅ PHASE 2 – scrape each job link for full description
+# ───────────────────────────────────────────────────────────────
+def scrape_job_descriptions(jobs):
+    driver = setup_driver()
+    wait = WebDriverWait(driver, 20)
+
+    results = []
+
+    for i, job in enumerate(jobs, start=1):
+        link = job["job_link"]
+        print(f"[{ts()}] 🌐 ({i}/{len(jobs)}) Opening {link}")
+        try:
+            driver.get(link)
+            # wait for job description block
+            desc_elem = wait.until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']"))
+            )
+            description_html = desc_elem.get_attribute("outerHTML")
+
+            job["description"] = description_html
+            results.append(job)
+            print(f"   ✅ Scraped {job['jobid']} — {job['title']}")
+        except Exception as e:
+            print(f"   ⚠️ Failed to scrape {link}: {e}")
+            job["description"] = ""
+            results.append(job)
+
+    driver.quit()
+    print(f"[{ts()}] 📦 Done scraping {len(results)} job descriptions.")
 
     # Save CSV
-    df = pd.DataFrame(jobs)
-    csv_name = "schweiger_jobs_formatted.csv"
-    df.to_csv(csv_name, index=False, encoding="utf-8-sig")
-    print(f"📦 Done! Scraped {len(df)} jobs out of expected {job_count_text or 'Unknown'}.")
-    print(f"💡 File saved as '{csv_name}' with full HTML formatting in descriptions.")
+    csv_file = "workday_jobs_full.csv"
+    with open(csv_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["jobid", "title", "location", "time_type", "posted_on", "job_link", "description"])
+        for j in results:
+            writer.writerow([
+                j.get("jobid", ""),
+                j.get("title", ""),
+                j.get("location", ""),
+                j.get("time_type", ""),
+                j.get("posted_on", ""),
+                j.get("job_link", ""),
+                j.get("description", ""),
+            ])
+    print(f"[{ts()}] 💾 CSV saved as '{csv_file}'")
+
+    # Save XML
+    root = Element("jobs")
+    for j in results:
+        job_el = SubElement(root, "job")
+        SubElement(job_el, "jobid").text = j.get("jobid", "")
+        SubElement(job_el, "title").text = j.get("title", "")
+        SubElement(job_el, "location").text = j.get("location", "")
+        SubElement(job_el, "time_type").text = j.get("time_type", "")
+        SubElement(job_el, "posted_on").text = j.get("posted_on", "")
+        SubElement(job_el, "job_link").text = j.get("job_link", "")
+        desc_el = SubElement(job_el, "description")
+        desc_el.text = f"<![CDATA[{j.get('description', '')}]]>"
+
+    xml_file = "workday_jobs_full.xml"
+    ElementTree(root).write(xml_file, encoding="utf-8", xml_declaration=True)
+    print(f"[{ts()}] 💾 XML saved as '{xml_file}' ✅")
 
 
+# ───────────────────────────────────────────────────────────────
+# ✅ MAIN RUN
+# ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    scrape_workday_jobs()
+    jobs = collect_jobs()
+    scrape_job_descriptions(jobs)
