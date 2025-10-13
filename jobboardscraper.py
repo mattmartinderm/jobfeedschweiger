@@ -6,10 +6,11 @@ from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service as ChromeService
-from selenium.webdriver.chrome.options import Options as ChromeOptions
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
+from bs4 import BeautifulSoup
 from xml.etree.ElementTree import Element, SubElement, ElementTree
 
 
@@ -17,30 +18,24 @@ def ts():
     return datetime.now().strftime("%H:%M:%S")
 
 
-# ───────────────────────────────────────────────────────────────
-# ✅ SETUP: Chrome WebDriver (works local + GitHub)
-# ───────────────────────────────────────────────────────────────
 def setup_driver():
     print(f"[{ts()}] 🧩 Setting up Chrome WebDriver...")
-
-    options = ChromeOptions()
-    options.add_argument("--headless=new")  # run headless in GitHub
+    options = Options()
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--window-size=1920,1080")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-
     service = ChromeService(ChromeDriverManager().install())
     driver = webdriver.Chrome(service=service, options=options)
     driver.set_page_load_timeout(60)
-    print(f"[{ts()}] ✅ Chrome WebDriver ready.")
+    print(f"[{ts()}] ✅ WebDriver ready.")
     return driver
 
 
-# ───────────────────────────────────────────────────────────────
-# ✅ PHASE 1: Collect all job listings from Workday
-# ───────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# ✅ PHASE 1 – Collect job listings from Workday
+# ────────────────────────────────────────────────
 def collect_jobs():
     url = "https://schweigerderm.wd12.myworkdayjobs.com/en-US/SchweigerCareers"
     driver = setup_driver()
@@ -49,7 +44,7 @@ def collect_jobs():
     print(f"[{ts()}] 🌐 Opening {url}")
     driver.get(url)
 
-    # Wait for total job count
+    # Wait for job count
     job_count_text = ""
     for attempt in range(10):
         try:
@@ -74,8 +69,8 @@ def collect_jobs():
     time.sleep(1)
 
     all_jobs = []
-    page = 1
     seen_job_ids = set()
+    page = 1
 
     def scrape_page():
         links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
@@ -110,12 +105,12 @@ def collect_jobs():
                 all_jobs.append(job_data)
                 seen_job_ids.add(job_id)
                 print(f"   ▶️ {job_id} | {title} | {location}")
-
             except Exception as e:
                 print(f"   ⚠️ Error scraping job {i}: {e}")
 
     scrape_page()
 
+    # Pagination
     try:
         page_buttons = driver.find_elements(By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
         total_pages = len(page_buttons)
@@ -156,9 +151,9 @@ def collect_jobs():
     return all_jobs
 
 
-# ───────────────────────────────────────────────────────────────
-# ✅ PHASE 2: Visit each job link and scrape full description
-# ───────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
+# ✅ PHASE 2 – Scrape full job descriptions + create XML
+# ────────────────────────────────────────────────
 def scrape_job_descriptions(jobs):
     driver = setup_driver()
     wait = WebDriverWait(driver, 20)
@@ -184,7 +179,7 @@ def scrape_job_descriptions(jobs):
     driver.quit()
     print(f"[{ts()}] 📦 Done scraping {len(results)} job descriptions.")
 
-    # Save CSV
+    # CSV
     csv_file = "workday_jobs_full.csv"
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -201,8 +196,9 @@ def scrape_job_descriptions(jobs):
             ])
     print(f"[{ts()}] 💾 CSV saved as '{csv_file}'")
 
-    # Save XML
+    # XML (clean for JBoard)
     root = Element("jobs")
+
     for j in results:
         job_el = SubElement(root, "job")
         SubElement(job_el, "jobid").text = j.get("jobid", "")
@@ -211,19 +207,32 @@ def scrape_job_descriptions(jobs):
         SubElement(job_el, "time_type").text = j.get("time_type", "")
         SubElement(job_el, "posted_on").text = j.get("posted_on", "")
         SubElement(job_el, "job_link").text = j.get("job_link", "")
+
+        raw_html = j.get("description", "")
+        soup = BeautifulSoup(raw_html, "html.parser")
+        main_div = soup.find("div", {"data-automation-id": "jobPostingDescription"})
+        if main_div:
+            cleaned_html = ''.join(str(child) for child in main_div.contents)
+        else:
+            cleaned_html = raw_html
+
+        # Remove style + class attributes
+        for tag in soup.find_all(True):
+            tag.attrs = {k: v for k, v in tag.attrs.items() if k in ["href", "target", "rel"]}
+
         desc_el = SubElement(job_el, "description")
-        desc_el.text = f"<![CDATA[{j.get('description', '')}]]>"
+        desc_el.text = f"<![CDATA[{cleaned_html.strip()}]]>"
 
     xml_file = "workday_jobs_full.xml"
     ElementTree(root).write(xml_file, encoding="utf-8", xml_declaration=True)
     print(f"[{ts()}] 💾 XML saved as '{xml_file}' ✅")
 
 
-# ───────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
 # ✅ MAIN EXECUTION
-# ───────────────────────────────────────────────────────────────
+# ────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"[{ts()}] 🚀 Job board scrape started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"[{ts()}] 🚀 Job board scrape started at {datetime.now()}")
     jobs = collect_jobs()
     scrape_job_descriptions(jobs)
     print(f"[{ts()}] 🏁 All done!")
