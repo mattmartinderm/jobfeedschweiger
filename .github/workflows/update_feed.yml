@@ -2,9 +2,8 @@ name: Update Schweiger Job Feed
 
 on:
   schedule:
-    # Runs every day at 8:00 PM CST (CST = UTC-6)
-    - cron: "0 2 * * *"
-  workflow_dispatch:  # allows manual trigger in GitHub UI
+    - cron: "0 2 * * *"  # 8:00 PM CST daily
+  workflow_dispatch:
 
 jobs:
   update-feed:
@@ -19,45 +18,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install selenium pandas webdriver-manager
-
-      - name: Install Firefox and Geckodriver (headless compatible)
+      - name: Install Google Chrome
         run: |
           sudo apt-get update
-          # Handle libraries across Ubuntu versions (some have *t64* suffix)
-          sudo apt-get install -y wget libgtk-3-0 libdbus-glib-1-2 libxt6 libx11-xcb1 || true
-          sudo apt-get install -y libasound2t64 || sudo apt-get install -y libasound2 || true
+          sudo apt-get install -y google-chrome-stable || true
 
-          # Use stable ESR Firefox (long-term support, avoids 404s)
-          FIREFOX_VERSION="115.15.0esr"
-          wget -O firefox.tar.bz2 "https://download-installer.cdn.mozilla.net/pub/firefox/releases/${FIREFOX_VERSION}/linux-x86_64/en-US/firefox-${FIREFOX_VERSION}.tar.bz2"
-          tar -xjf firefox.tar.bz2
-          sudo mv firefox /opt/firefox
-          sudo ln -sf /opt/firefox/firefox /usr/local/bin/firefox
-
-          # Install latest Geckodriver from GitHub
-          GECKO_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest \
-            | grep '"tag_name"' | cut -d '"' -f 4)
-          wget -q "https://github.com/mozilla/geckodriver/releases/download/$GECKO_VERSION/geckodriver-$GECKO_VERSION-linux64.tar.gz"
-          tar -xzf geckodriver-$GECKO_VERSION-linux64.tar.gz
-          sudo mv geckodriver /usr/local/bin/
-
-          # Print installed versions for debugging
-          echo "Installed Firefox version:"
-          firefox --version
-          echo "Installed Geckodriver version:"
-          geckodriver --version
+      - name: Install Python dependencies
+        run: |
+          pip install selenium pandas webdriver-manager lxml
 
       - name: Run job scraper
         run: |
           python jobboardscraper.py
-
-      - name: Generate XML feed
-        run: |
-          python generate_xml_feed.py
 
       - name: Commit and push updates
         run: |
