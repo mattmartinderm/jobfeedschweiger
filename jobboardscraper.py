@@ -1,168 +1,160 @@
 import time
-import pandas as pd
 import re
+import pandas as pd
 from selenium import webdriver
+from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.firefox.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.firefox import GeckoDriverManager
 
 
 def setup_driver():
-    """Set up a headless Firefox driver."""
+    """Set up headless Firefox WebDriver for GitHub Actions."""
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
+    options.add_argument("--disable-gpu")
     options.add_argument("--disable-dev-shm-usage")
-    return webdriver.Firefox(service=FirefoxService(GeckoDriverManager().install()), options=options)
+    service = FirefoxService(GeckoDriverManager().install())
+    return webdriver.Firefox(service=service, options=options)
 
 
 def scrape_workday_jobs():
-    """Scrapes Schweiger Dermatology Workday job listings and saves to CSV."""
-    base_url = "https://schweigerderm.wd12.myworkdayjobs.com/en-US/SchweigerCareers"
+    """Scrape all job listings from Schweiger Dermatology's Workday site."""
     driver = setup_driver()
-    driver.get(base_url)
     wait = WebDriverWait(driver, 45)
+    url = "https://schweigerderm.wd12.myworkdayjobs.com/en-US/SchweigerCareers"
+    driver.get(url)
 
     print("🌐 Opening Schweiger Dermatology Careers page...")
 
-    # Wait for job count text (supports both selectors)
-    try:
-        job_count_el = wait.until(
-            EC.presence_of_any_elements_located([
-                (By.CSS_SELECTOR, "p[data-automation-id='jobFoundText']"),
-                (By.CSS_SELECTOR, "span[data-automation-id='jobCount']")
-            ])
-        )[0]
-        job_count_text = job_count_el.text.strip()
-        print(f"🔎 Job count text: {job_count_text}")
-    except Exception:
-        print("⚠️  Could not find job count text.")
-        job_count_text = "Unknown"
+    # Wait for total job count
+    job_count_text = None
+    for _ in range(5):
+        try:
+            count_elem = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "h2[data-automation-id='jobCount']")))
+            job_count_text = count_elem.text.strip()
+            if job_count_text:
+                print(f"🔎 Job count text: {job_count_text}")
+                break
+        except:
+            time.sleep(3)
 
-    # Wait for job titles
+    if not job_count_text:
+        print("⚠️ Could not find job count text. Continuing anyway.")
+
+    # Wait for job list
     print("⏳ Waiting for job titles to appear...")
     wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
+    time.sleep(2)
 
-    all_jobs = []
-    total_jobs_scraped = 0
+    jobs = []
     page_num = 1
 
-    while True:
-        print(f"📄 Scraping page {page_num}...")
-        time.sleep(2)
+    # Helper function to scrape all job cards on the current page
+    def scrape_page(page_number):
+        job_cards = driver.find_elements(By.CSS_SELECTOR, "li[data-automation-id='compositeJobPosting']")
+        print(f"📄 Scraping page {page_number}...")
+        print(f"   Found {len(job_cards)} jobs on this page.")
 
-        job_links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
-        print(f"   Found {len(job_links)} jobs on this page.")
-
-        for index, job_link in enumerate(job_links, start=1):
+        for i, card in enumerate(job_cards, start=1):
             try:
-                title = job_link.text.strip()
-                job_url = job_link.get_attribute("href")
+                title_elem = card.find_element(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
+                title = title_elem.text.strip()
+                job_link = title_elem.get_attribute("href")
 
-                # ✅ Extract Job ID (e.g., R-195)
-                job_id_match = re.search(r"(R-\d+)", job_url)
+                # Extract job ID (e.g. R-12345)
+                job_id_match = re.search(r"(R-\d+)", job_link)
                 job_id = job_id_match.group(1) if job_id_match else "N/A"
 
-                driver.execute_script("arguments[0].scrollIntoView(true);", job_link)
-                job_link.click()
+                # Extract location, time type, and posting date
+                location_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='locations']")
+                location = location_elem.text.strip() if location_elem else "N/A"
 
-                # Wait for description page to load
+                time_type_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='timeType']")
+                time_type = time_type_elem.text.strip() if time_type_elem else "N/A"
+
+                posted_elem = card.find_element(By.CSS_SELECTOR, "div[data-automation-id='postedOn']")
+                posted_on = posted_elem.text.strip() if posted_elem else "N/A"
+
+                # Open detail page in a new tab
+                driver.execute_script("window.open(arguments[0]);", job_link)
+                driver.switch_to.window(driver.window_handles[-1])
                 wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']")))
-                time.sleep(1)
 
-                # Extract fields
-                try:
-                    location_elems = driver.find_elements(By.CSS_SELECTOR, "div[data-automation-id='locations'] dd.css-129m7dg")
-                    locations = [el.text.strip() for el in location_elems]
-                    location_text = ", ".join(locations) if locations else "N/A"
-                except:
-                    location_text = "N/A"
+                desc_elem = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']")
+                description_html = desc_elem.get_attribute("outerHTML")
 
-                try:
-                    time_type_el = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='time'] dd.css-129m7dg")
-                    time_type = time_type_el.text.strip()
-                except:
-                    time_type = "N/A"
+                apply_link_elem = driver.find_element(By.CSS_SELECTOR, "a[data-automation-id='applyButton']")
+                apply_link = apply_link_elem.get_attribute("href")
 
-                try:
-                    posted_on_el = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='postedOn'] dd.css-129m7dg")
-                    posted_on = posted_on_el.text.strip()
-                except:
-                    posted_on = "N/A"
-
-                try:
-                    description_el = driver.find_element(By.CSS_SELECTOR, "div[data-automation-id='jobPostingDescription']")
-                    description_html = description_el.get_attribute("innerHTML").strip()
-                except:
-                    description_html = "N/A"
-
-                try:
-                    apply_link_el = driver.find_element(By.CSS_SELECTOR, "a[data-automation-id='adventureButton']")
-                    apply_link = apply_link_el.get_attribute("href")
-                except:
-                    apply_link = job_url
-
-                # ✅ Store job data
-                job_data = {
+                jobs.append({
                     "Job ID": job_id,
                     "Title": title,
-                    "Location": location_text,
+                    "Location": location,
                     "Time Type": time_type,
                     "Posted On": posted_on,
-                    "Description": description_html,
                     "Apply Link": apply_link,
-                    "Job Link": job_url
-                }
-                all_jobs.append(job_data)
-                total_jobs_scraped += 1
+                    "Job Link": job_link,
+                    "Description": description_html
+                })
 
-                print(f"   ✅ Scraped job {total_jobs_scraped}: {title}...")
-
-                driver.back()
-                # Wait for job list to reappear before continuing
-                wait.until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")))
-                time.sleep(1)
-
-                # Refresh job_links after going back
-                job_links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
+                driver.close()
+                driver.switch_to.window(driver.window_handles[0])
+                print(f"   ✅ Scraped job {i}: {title}...")
 
             except Exception as e:
-                print(f"⚠️  Error scraping job {index}: {e}")
-                driver.back()
-                time.sleep(2)
-                continue
+                print(f"   ⚠️ Error scraping job {i} on page {page_number}: {e}")
+                if len(driver.window_handles) > 1:
+                    driver.close()
+                    driver.switch_to.window(driver.window_handles[0])
 
-        # Pagination with page refresh detection
-        try:
-            next_button = driver.find_element(By.CSS_SELECTOR, "button[aria-label='Next']")
-            if next_button.is_enabled():
-                first_title_before = job_links[0].text.strip() if job_links else ""
-                driver.execute_script("arguments[0].click();", next_button)
-                page_num += 1
-                print(f"⏭️ Moving to page {page_num}... Waiting for jobs to refresh...")
+    # Scrape first page
+    scrape_page(page_num)
 
-                # Wait for a new job list to appear that differs from previous
+    # Pagination via numbered buttons
+    try:
+        time.sleep(2)
+        wait.until(EC.presence_of_all_elements_located(
+            (By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
+        ))
+        page_buttons = driver.find_elements(By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
+        total_pages = len(page_buttons)
+        print(f"🧭 Detected {total_pages} pages of results.")
+
+        for p in range(2, total_pages + 1):
+            try:
+                page_button = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, f"button[aria-label='page {p}']")))
+                first_title_before = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")[0].text.strip()
+
+                driver.execute_script("arguments[0].click();", page_button)
+                print(f"⏭️ Navigating to page {p}... Waiting for jobs to refresh...")
+
                 wait.until(lambda d: (
                     d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']") and
                     d.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")[0].text.strip() != first_title_before
                 ))
                 time.sleep(2)
-            else:
-                print("⏹️ Reached last page or could not find next button.")
+
+                scrape_page(p)
+
+            except Exception as e:
+                print(f"⚠️ Pagination failed at page {p}: {e}")
                 break
-        except Exception as e:
-            print(f"⏹️ Pagination ended or failed: {e}")
-            break
+
+    except Exception as e:
+        print(f"⏹️ Pagination setup failed: {e}")
 
     driver.quit()
 
-    df = pd.DataFrame(all_jobs)
-    df.to_csv("schweiger_jobs_formatted.csv", index=False, encoding="utf-8-sig")
-    print(f"📦 Done! Scraped {total_jobs_scraped} jobs out of expected {job_count_text}.")
-    print("💡 File saved as 'schweiger_jobs_formatted.csv' with full HTML formatting in descriptions.")
+    # Save CSV
+    df = pd.DataFrame(jobs)
+    csv_name = "schweiger_jobs_formatted.csv"
+    df.to_csv(csv_name, index=False, encoding="utf-8-sig")
+    print(f"📦 Done! Scraped {len(df)} jobs out of expected {job_count_text or 'Unknown'}.")
+    print(f"💡 File saved as '{csv_name}' with full HTML formatting in descriptions.")
 
 
 if __name__ == "__main__":
