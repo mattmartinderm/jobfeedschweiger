@@ -1,44 +1,37 @@
 import pandas as pd
-import os
-from xml.etree.ElementTree import Element, SubElement, tostring
-from xml.dom import minidom
-
+import xml.etree.ElementTree as ET
 
 def generate_xml_from_csv(csv_file, xml_file):
-    """Convert the Schweiger job CSV to an XML feed."""
-    if not os.path.exists(csv_file) or os.path.getsize(csv_file) == 0:
-        print(f"⚠️  CSV file '{csv_file}' is missing or empty. Skipping XML generation.")
-        return
-
     try:
         df = pd.read_csv(csv_file)
-    except pd.errors.EmptyDataError:
-        print(f"⚠️  CSV file '{csv_file}' is empty or unreadable.")
+    except Exception as e:
+        print(f"❌ Error reading CSV: {e}")
         return
 
-    if df.empty:
-        print(f"⚠️  CSV file '{csv_file}' has no rows.")
-        return
-
-    root = Element("jobs")
+    # Root element
+    root = ET.Element("jobs")
 
     for _, row in df.iterrows():
-        job_el = SubElement(root, "job")
+        job = ET.SubElement(root, "job")
 
-        SubElement(job_el, "title").text = str(row.get("Job Title", ""))
-        SubElement(job_el, "timeType").text = str(row.get("Time Type", ""))
-        SubElement(job_el, "locations").text = str(row.get("Location(s)", ""))
-        SubElement(job_el, "datePosted").text = str(row.get("Date Posted", ""))
-        SubElement(job_el, "url").text = str(row.get("Job URL", ""))
-        SubElement(job_el, "applyUrl").text = str(row.get("Apply URL", ""))
+        # Add job fields
+        ET.SubElement(job, "jobid").text = str(row.get("Job ID", "N/A"))
+        ET.SubElement(job, "title").text = str(row.get("Title", "N/A"))
+        ET.SubElement(job, "location").text = str(row.get("Location", "N/A"))
+        ET.SubElement(job, "time_type").text = str(row.get("Time Type", "N/A"))
+        ET.SubElement(job, "posted_on").text = str(row.get("Posted On", "N/A"))
+        ET.SubElement(job, "apply_link").text = str(row.get("Apply Link", "N/A"))
+        ET.SubElement(job, "job_link").text = str(row.get("Job Link", "N/A"))
 
-        desc_html = str(row.get("Description (HTML)", ""))
-        desc_el = SubElement(job_el, "description")
-        desc_el.text = f"<![CDATA[{desc_html}]]>"
+        # Description in CDATA to preserve HTML formatting
+        desc = ET.SubElement(job, "description")
+        description_html = str(row.get("Description", ""))
+        desc.text = f"<![CDATA[{description_html}]]>"
 
-    xml_str = minidom.parseString(tostring(root, "utf-8")).toprettyxml(indent="  ")
-    with open(xml_file, "w", encoding="utf-8") as f:
-        f.write(xml_str)
+    # Build the tree
+    tree = ET.ElementTree(root)
+    ET.indent(tree, space="  ", level=0)
+    tree.write(xml_file, encoding="utf-8", xml_declaration=True)
 
     print(f"✅ XML feed created: {xml_file} with {len(df)} jobs.")
 
