@@ -31,17 +31,9 @@ jobs:
         run: |
           python jobboardscraper.py
 
-      - name: Generate XML feed
+      - name: Rename XML file for GitHub Pages
         run: |
-          python generate_xml_feed.py
-
-      - name: Ensure XML feed exists
-        run: |
-          if [ ! -f schweiger_jobs.xml ]; then
-            echo "⚠️ XML file not found!"
-            exit 1
-          fi
-          echo "✅ XML file confirmed."
+          mv workday_jobs_full.xml schweiger_jobs.xml
 
       - name: Commit and push updates
         run: |
@@ -50,4 +42,3 @@ jobs:
           git add schweiger_jobs.xml || echo "No XML to add"
           git commit -m "Auto-update XML feed" || echo "No changes to commit"
           git push
-
