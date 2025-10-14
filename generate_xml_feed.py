@@ -1,77 +1,69 @@
 import csv
 import xml.etree.ElementTree as ET
 from bs4 import BeautifulSoup
-import re
 
-# ---------------------------------------------------------------------------
-# Helper function to clean and format descriptions
-# ---------------------------------------------------------------------------
-def clean_description(html_content):
-    """Convert HTML into readable plain text while keeping structure."""
-    soup = BeautifulSoup(html_content or "", "html.parser")
+# Input and output file names
+INPUT_CSV = "workday_jobs_full.csv"
+OUTPUT_XML = "schweiger_jobs.xml"
 
-    # Replace <br> tags with newlines
-    for br in soup.find_all("br"):
-        br.replace_with("\n")
+def clean_html_keep_text(html):
+    """Removes all HTML tags and keeps readable text only."""
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text(separator="\n", strip=True)
+    return text
 
-    # Add bullets for <li> elements
-    for li in soup.find_all("li"):
-        li.insert_before("• ")
-        li.append("\n")
+def clean_posted_on(raw):
+    """Removes any version of 'posted', 'Posted on', etc."""
+    if not raw:
+        return ""
+    text = raw.strip()
+    # Remove any case-insensitive 'posted' words and 'on'
+    text = text.replace("\n", " ")
+    words = text.split()
+    cleaned = " ".join([w for w in words if w.lower() not in {"posted", "on"}])
+    return cleaned.strip()
 
-    # Add line breaks after <p> elements
-    for p in soup.find_all("p"):
-        p.insert_after("\n")
-
-    # Extract readable text
-    text = soup.get_text(separator=" ", strip=True)
-
-    # Collapse extra spaces/newlines
-    text = re.sub(r'\n\s*\n+', '\n\n', text).strip()
-
-    # Wrap in CDATA so XML remains valid
-    return f"<![CDATA[{text}]]>"
-
-# ---------------------------------------------------------------------------
-# Main XML feed generator
-# ---------------------------------------------------------------------------
-def generate_xml_feed(input_csv="workday_jobs_full.csv", output_xml="schweiger_jobs.xml"):
+def main():
     jobs = []
 
-    # Read from CSV
-    with open(input_csv, newline='', encoding='utf-8') as csvfile:
+    # Read the CSV file
+    with open(INPUT_CSV, newline='', encoding="utf-8") as csvfile:
         reader = csv.DictReader(csvfile)
         for row in reader:
-            jobs.append(row)
+            jobs.append({
+                "jobid": row.get("jobid", "").strip(),
+                "title": row.get("title", "").strip(),
+                "location": row.get("location", "").replace("locations ", "").strip(),
+                "time_type": row.get("time_type", "").strip(),
+                "posted_on": clean_posted_on(row.get("posted_on", "")),
+                "job_link": row.get("job_link", "").strip(),
+                "description": clean_html_keep_text(row.get("description", "")),
+            })
 
-    # Create XML root
+    # Create XML structure
     root = ET.Element("jobs")
 
-    # Iterate through jobs and create elements
     for job in jobs:
         job_elem = ET.SubElement(root, "job")
 
-        ET.SubElement(job_elem, "jobid").text = job.get("jobid", "")
-        ET.SubElement(job_elem, "title").text = job.get("title", "")
-        ET.SubElement(job_elem, "location").text = job.get("location", "")
-        ET.SubElement(job_elem, "time_type").text = job.get("time_type", "")
-        ET.SubElement(job_elem, "posted_on").text = job.get("posted_on", "")
-        ET.SubElement(job_elem, "job_link").text = job.get("job_link", "")
+        ET.SubElement(job_elem, "jobid").text = job["jobid"]
+        ET.SubElement(job_elem, "title").text = job["title"]
+        ET.SubElement(job_elem, "location").text = job["location"]
+        ET.SubElement(job_elem, "time_type").text = job["time_type"]
+        ET.SubElement(job_elem, "posted_on").text = job["posted_on"]
+        ET.SubElement(job_elem, "job_link").text = job["job_link"]
 
-        # Clean and add job description
-        html_description = job.get("description", "")
-        description_text = clean_description(html_description)
-        ET.SubElement(job_elem, "description").text = description_text
+        # Add description wrapped in CDATA
+        desc_elem = ET.SubElement(job_elem, "description")
+        desc_elem.text = f"<![CDATA[{job['description']}]]>"
 
-    # Write XML file
+    # Write the XML file
     tree = ET.ElementTree(root)
-    ET.indent(tree, space="  ", level=0)
-    tree.write(output_xml, encoding="utf-8", xml_declaration=True)
+    tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
 
-    print(f"✅ XML feed created: {output_xml} with {len(jobs)} jobs.")
+    print(f"✅ XML feed created: {OUTPUT_XML} with {len(jobs)} jobs.")
 
-# ---------------------------------------------------------------------------
-# Run the script
-# ---------------------------------------------------------------------------
 if __name__ == "__main__":
-    generate_xml_feed()
+    main()
