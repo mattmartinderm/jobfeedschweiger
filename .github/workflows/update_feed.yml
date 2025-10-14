@@ -31,19 +31,19 @@ jobs:
         run: |
           python jobboardscraper.py
 
-      - name: Rename XML for Pages
+      - name: Generate cleaned XML
         run: |
-          mv workday_jobs_full.xml schweiger_jobs.xml
+          python generate_xml_feed.py
 
-      - name: Commit and push updates
+      - name: Move XML for Pages
+        run: |
+          mv schweiger_jobs.xml schweiger_jobs.xml
+
+      - name: Commit and force push updates
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add .
+          git add schweiger_jobs.xml
           git commit -m "Auto-update XML feed" || echo "No changes to commit"
-          git push
-
-      - name: Force rebuild for GitHub Pages
-        run: |
-          git commit --allow-empty -m "Force rebuild for Pages"
-          git push
+          git pull --rebase origin main || true
+          git push -f origin main
