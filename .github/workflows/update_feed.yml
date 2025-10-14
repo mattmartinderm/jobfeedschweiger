@@ -2,7 +2,7 @@ name: Update Schweiger Job Feed
 
 on:
   schedule:
-    - cron: "0 2 * * *"  # 8:00 PM CST daily
+    - cron: "0 2 * * *"  # 8:00 PM CST daily (8:00 PM CST)
   workflow_dispatch:
 
 jobs:
@@ -31,13 +31,13 @@ jobs:
         run: |
           python jobboardscraper.py
 
+      - name: Clean old XML
+        run: |
+          rm -f schweiger_jobs.xml
+
       - name: Generate cleaned XML
         run: |
           python generate_xml_feed.py
-
-      - name: Move XML for Pages
-        run: |
-          mv schweiger_jobs.xml schweiger_jobs.xml
 
       - name: Commit and force push updates
         run: |
