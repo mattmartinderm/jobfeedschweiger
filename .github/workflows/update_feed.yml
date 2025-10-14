@@ -2,8 +2,9 @@ name: Update Schweiger Job Feed
 
 on:
   schedule:
-    - cron: "0 2 * * *"  # 8:00 PM CST daily
-  workflow_dispatch:
+    # Runs every day at 8:00 PM CST (CST = UTC-6)
+    - cron: "0 2 * * *"
+  workflow_dispatch:  # allows manual trigger in GitHub UI
 
 jobs:
   update-feed:
@@ -31,9 +32,11 @@ jobs:
         run: |
           python jobboardscraper.py
 
-      - name: Rename XML for site
+      - name: Rename XML for GitHub Pages
         run: |
-          mv workday_jobs_full.xml schweiger_jobs.xml
+          if [ -f workday_jobs_full.xml ]; then
+            mv workday_jobs_full.xml schweiger_jobs.xml
+          fi
 
       - name: Commit and push updates
         run: |
