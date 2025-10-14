@@ -2,11 +2,15 @@ import pandas as pd
 from bs4 import BeautifulSoup
 import re
 import html
+import math
 
 def format_text_description(raw_html):
     """Convert HTML to clean, structured plain text with readable spacing."""
-    if not raw_html:
+    if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
         return ""
+
+    # Ensure it's a string
+    raw_html = str(raw_html)
 
     soup = BeautifulSoup(raw_html, "html.parser")
 
@@ -68,7 +72,7 @@ def generate_xml():
         job_link = row.get("job_link", "")
         description_raw = row.get("description", "")
 
-        # Format the text nicely
+        # Safely format description
         description_clean = format_text_description(description_raw)
 
         xml_output.append(f"  <job>")
