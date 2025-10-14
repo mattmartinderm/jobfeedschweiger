@@ -10,8 +10,8 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
 from xml.etree.ElementTree import Element, SubElement, ElementTree
+from bs4 import BeautifulSoup
 
 
 def ts():
@@ -33,9 +33,9 @@ def setup_driver():
     return driver
 
 
-# ────────────────────────────────────────────────
-# ✅ PHASE 1 – Collect job listings from Workday
-# ────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# ✅ PHASE 1 – Collect job listings
+# ───────────────────────────────────────────────────────────────
 def collect_jobs():
     url = "https://schweigerderm.wd12.myworkdayjobs.com/en-US/SchweigerCareers"
     driver = setup_driver()
@@ -44,19 +44,15 @@ def collect_jobs():
     print(f"[{ts()}] 🌐 Opening {url}")
     driver.get(url)
 
-    # Wait for job count
+    # Wait for job count to appear
     job_count_text = ""
     for attempt in range(10):
         try:
-            elem = wait.until(
-                EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-automation-id='jobFoundText']"))
-            )
+            elem = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "p[data-automation-id='jobFoundText']")))
             job_count_text = elem.text.strip()
             if re.search(r"\d+", job_count_text):
                 print(f"[{ts()}] 🔍 Attempt {attempt+1}: jobFoundText = '{job_count_text}'")
                 break
-            else:
-                print(f"[{ts()}] ⏳ Attempt {attempt+1}: jobFoundText = '{job_count_text}'")
             time.sleep(1)
         except Exception as e:
             print(f"[{ts()}] ⚠️ Attempt {attempt+1} failed: {e}")
@@ -69,8 +65,8 @@ def collect_jobs():
     time.sleep(1)
 
     all_jobs = []
-    seen_job_ids = set()
     page = 1
+    seen_job_ids = set()
 
     def scrape_page():
         links = driver.find_elements(By.CSS_SELECTOR, "a[data-automation-id='jobTitle']")
@@ -90,7 +86,10 @@ def collect_jobs():
                     except:
                         return "N/A"
 
-                location = safe("div[data-automation-id='locations']")
+                # Clean location label
+                location_raw = safe("div[data-automation-id='locations']")
+                location = re.sub(r'^\s*locations\s*', '', location_raw, flags=re.IGNORECASE).strip()
+
                 time_type = safe("div[data-automation-id='timeType']")
                 posted_on = safe("div[data-automation-id='postedOn']")
 
@@ -110,7 +109,7 @@ def collect_jobs():
 
     scrape_page()
 
-    # Pagination
+    # Handle pagination
     try:
         page_buttons = driver.find_elements(By.CSS_SELECTOR, "button[data-uxi-widget-type='paginationPageButton']")
         total_pages = len(page_buttons)
@@ -151,9 +150,9 @@ def collect_jobs():
     return all_jobs
 
 
-# ────────────────────────────────────────────────
-# ✅ PHASE 2 – Scrape full job descriptions + create XML
-# ────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# ✅ PHASE 2 – Scrape job descriptions
+# ───────────────────────────────────────────────────────────────
 def scrape_job_descriptions(jobs):
     driver = setup_driver()
     wait = WebDriverWait(driver, 20)
@@ -179,7 +178,7 @@ def scrape_job_descriptions(jobs):
     driver.quit()
     print(f"[{ts()}] 📦 Done scraping {len(results)} job descriptions.")
 
-    # CSV
+    # Save CSV
     csv_file = "workday_jobs_full.csv"
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -196,30 +195,37 @@ def scrape_job_descriptions(jobs):
             ])
     print(f"[{ts()}] 💾 CSV saved as '{csv_file}'")
 
-    # XML (clean for JBoard)
+    # Save XML (cleaned)
     root = Element("jobs")
-
     for j in results:
         job_el = SubElement(root, "job")
         SubElement(job_el, "jobid").text = j.get("jobid", "")
         SubElement(job_el, "title").text = j.get("title", "")
-        SubElement(job_el, "location").text = j.get("location", "")
+
+        location_raw = j.get("location", "")
+        location_clean = re.sub(r'^\s*locations\s*', '', location_raw, flags=re.IGNORECASE).strip()
+        SubElement(job_el, "location").text = location_clean
+
         SubElement(job_el, "time_type").text = j.get("time_type", "")
         SubElement(job_el, "posted_on").text = j.get("posted_on", "")
         SubElement(job_el, "job_link").text = j.get("job_link", "")
 
+        # 🧹 Smart HTML cleaner
         raw_html = j.get("description", "")
         soup = BeautifulSoup(raw_html, "html.parser")
         main_div = soup.find("div", {"data-automation-id": "jobPostingDescription"})
         if main_div:
-            cleaned_html = ''.join(str(child) for child in main_div.contents)
-        else:
-            cleaned_html = raw_html
+            content_html = ''.join(str(child) for child in main_div.contents)
+            soup = BeautifulSoup(content_html, "html.parser")
 
-        # Remove style + class attributes
+        allowed_tags = ["p", "ul", "ol", "li", "b", "strong", "i", "em", "u", "br", "a"]
         for tag in soup.find_all(True):
-            tag.attrs = {k: v for k, v in tag.attrs.items() if k in ["href", "target", "rel"]}
+            if tag.name not in allowed_tags:
+                tag.unwrap()
+            else:
+                tag.attrs = {k: v for k, v in tag.attrs.items() if k in ["href", "target", "rel"]}
 
+        cleaned_html = str(soup)
         desc_el = SubElement(job_el, "description")
         desc_el.text = f"<![CDATA[{cleaned_html.strip()}]]>"
 
@@ -228,11 +234,9 @@ def scrape_job_descriptions(jobs):
     print(f"[{ts()}] 💾 XML saved as '{xml_file}' ✅")
 
 
-# ────────────────────────────────────────────────
-# ✅ MAIN EXECUTION
-# ────────────────────────────────────────────────
+# ───────────────────────────────────────────────────────────────
+# ✅ MAIN RUN
+# ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"[{ts()}] 🚀 Job board scrape started at {datetime.now()}")
     jobs = collect_jobs()
     scrape_job_descriptions(jobs)
-    print(f"[{ts()}] 🏁 All done!")
