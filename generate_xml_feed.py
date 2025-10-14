@@ -1,69 +1,93 @@
-import csv
-import xml.etree.ElementTree as ET
+import pandas as pd
 from bs4 import BeautifulSoup
+import re
+import html
 
-# Input and output file names
-INPUT_CSV = "workday_jobs_full.csv"
-OUTPUT_XML = "schweiger_jobs.xml"
-
-def clean_html_keep_text(html):
-    """Removes all HTML tags and keeps readable text only."""
-    if not html:
+def format_text_description(raw_html):
+    """Convert HTML to clean, structured plain text with readable spacing."""
+    if not raw_html:
         return ""
-    soup = BeautifulSoup(html, "html.parser")
-    text = soup.get_text(separator="\n", strip=True)
-    return text
 
-def clean_posted_on(raw):
-    """Removes any version of 'posted', 'Posted on', etc."""
-    if not raw:
-        return ""
-    text = raw.strip()
-    # Remove any case-insensitive 'posted' words and 'on'
-    text = text.replace("\n", " ")
-    words = text.split()
-    cleaned = " ".join([w for w in words if w.lower() not in {"posted", "on"}])
-    return cleaned.strip()
+    soup = BeautifulSoup(raw_html, "html.parser")
 
-def main():
-    jobs = []
+    # Replace anchor tags with plain text (keep visible text only)
+    for a in soup.find_all("a"):
+        link_text = a.get_text(" ", strip=True)
+        href = a.get("href", "")
+        if href:
+            a.replace_with(f"{link_text} ({href})")
+        else:
+            a.replace_with(link_text)
 
-    # Read the CSV file
-    with open(INPUT_CSV, newline='', encoding="utf-8") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            jobs.append({
-                "jobid": row.get("jobid", "").strip(),
-                "title": row.get("title", "").strip(),
-                "location": row.get("location", "").replace("locations ", "").strip(),
-                "time_type": row.get("time_type", "").strip(),
-                "posted_on": clean_posted_on(row.get("posted_on", "")),
-                "job_link": row.get("job_link", "").strip(),
-                "description": clean_html_keep_text(row.get("description", "")),
-            })
+    # Add bullets before <li> tags
+    for li in soup.find_all("li"):
+        li.insert_before("\n• ")
+        li.insert_after("\n")
 
-    # Create XML structure
-    root = ET.Element("jobs")
+    # Add spacing around key tags
+    for tag in soup.find_all(["p", "div", "ul", "br"]):
+        tag.insert_before("\n")
+        tag.insert_after("\n")
 
-    for job in jobs:
-        job_elem = ET.SubElement(root, "job")
+    text = soup.get_text(" ", strip=True)
 
-        ET.SubElement(job_elem, "jobid").text = job["jobid"]
-        ET.SubElement(job_elem, "title").text = job["title"]
-        ET.SubElement(job_elem, "location").text = job["location"]
-        ET.SubElement(job_elem, "time_type").text = job["time_type"]
-        ET.SubElement(job_elem, "posted_on").text = job["posted_on"]
-        ET.SubElement(job_elem, "job_link").text = job["job_link"]
+    # Decode HTML entities
+    text = html.unescape(text)
 
-        # Add description wrapped in CDATA
-        desc_elem = ET.SubElement(job_elem, "description")
-        desc_elem.text = f"<![CDATA[{job['description']}]]>"
+    # Normalize whitespace and fix spacing
+    text = re.sub(r"\s{2,}", " ", text)
+    text = re.sub(r"\n\s*\n+", "\n\n", text)
 
-    # Write the XML file
-    tree = ET.ElementTree(root)
-    tree.write(OUTPUT_XML, encoding="utf-8", xml_declaration=True)
+    # Add emphasis spacing for major headers
+    headers = [
+        "Job Summary:", "Schedule:", "Travel:", "Essential Functions:", 
+        "Qualifications:", "Salary Range", "Hourly Pay Range"
+    ]
+    for header in headers:
+        text = re.sub(fr"({header})", r"\n\n\1", text)
 
-    print(f"✅ XML feed created: {OUTPUT_XML} with {len(jobs)} jobs.")
+    # Ensure consistent paragraph breaks
+    text = re.sub(r"(\S)\n(\S)", r"\1\n\n\2", text)
+
+    return text.strip()
+
+
+def generate_xml():
+    print("🧩 Generating XML feed with professional formatting...")
+
+    df = pd.read_csv("workday_jobs_full.csv")
+
+    xml_output = ["<?xml version='1.0' encoding='utf-8'?>", "<jobs>"]
+
+    for _, row in df.iterrows():
+        jobid = row.get("jobid", "")
+        title = row.get("title", "")
+        location = row.get("location", "").replace("locations ", "").strip()
+        time_type = row.get("time_type", "N/A")
+        posted_on = str(row.get("posted_on", "")).replace("posted on", "").strip()
+        job_link = row.get("job_link", "")
+        description_raw = row.get("description", "")
+
+        # Format the text nicely
+        description_clean = format_text_description(description_raw)
+
+        xml_output.append(f"  <job>")
+        xml_output.append(f"    <jobid>{jobid}</jobid>")
+        xml_output.append(f"    <title>{title}</title>")
+        xml_output.append(f"    <location>{location}</location>")
+        xml_output.append(f"    <time_type>{time_type}</time_type>")
+        xml_output.append(f"    <posted_on>{posted_on}</posted_on>")
+        xml_output.append(f"    <job_link>{job_link}</job_link>")
+        xml_output.append(f"    <description><![CDATA[{description_clean}]]></description>")
+        xml_output.append(f"  </job>")
+
+    xml_output.append("</jobs>")
+
+    with open("schweiger_jobs.xml", "w", encoding="utf-8") as f:
+        f.write("\n".join(xml_output))
+
+    print(f"✅ XML feed created: schweiger_jobs.xml with {len(df)} jobs.")
+
 
 if __name__ == "__main__":
-    main()
+    generate_xml()
