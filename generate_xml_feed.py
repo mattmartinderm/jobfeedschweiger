@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 # Clean & format the job description text
 # -------------------------------------------------------
 def format_text_description(raw_html):
-    """Convert HTML to clean, structured plain text with bold headers and indentation."""
+    """Convert HTML to clean, structured plain text with readable formatting."""
     import math
     if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
         return ""
@@ -74,41 +74,40 @@ def format_text_description(raw_html):
 def generate_xml():
     print("🧩 Generating XML feed with professional formatting...")
 
-    # Load the CSV file exported from Workday scraper
+    # Load CSV
     df = pd.read_csv("workday_jobs_full.csv")
 
-    # Create root XML element
     root = ET.Element("jobs")
 
     for _, row in df.iterrows():
         job = ET.SubElement(root, "job")
 
-        # Add elements
-        ET.SubElement(job, "jobid").text = str(row.get("Job ID", "")).strip()
-        ET.SubElement(job, "title").text = str(row.get("Title", "")).strip()
-        ET.SubElement(job, "location").text = str(row.get("Location", "")).replace("locations", "").strip()
-        ET.SubElement(job, "time_type").text = str(row.get("Time Type", "N/A")).strip()
+        # Match CSV headers exactly
+        ET.SubElement(job, "jobid").text = str(row.get("jobid", "")).strip()
+        ET.SubElement(job, "title").text = str(row.get("title", "")).strip()
+        ET.SubElement(job, "location").text = str(row.get("location", "")).replace("locations", "").strip()
+        ET.SubElement(job, "time_type").text = str(row.get("time_type", "N/A")).strip()
 
-        # Format posted date without "posted on"
-        posted = str(row.get("Posted", "")).replace("posted on", "").replace("Posted", "").strip()
-        ET.SubElement(job, "posted_on").text = posted
+        # Remove "posted" from the posted_on field
+        posted_clean = str(row.get("posted_on", "")).replace("posted on", "").replace("Posted", "").strip()
+        ET.SubElement(job, "posted_on").text = posted_clean
 
-        ET.SubElement(job, "job_link").text = str(row.get("Job Link", "")).strip()
+        ET.SubElement(job, "job_link").text = str(row.get("job_link", "")).strip()
 
-        # Clean up and format job description
-        description_raw = row.get("Description", "")
+        # Clean and format description
+        description_raw = row.get("description", "")
         description_clean = format_text_description(description_raw)
 
         desc_element = ET.SubElement(job, "description")
         desc_element.text = f"<![CDATA[{description_clean}]]>"
 
-    # Write formatted XML file
+    # Write final XML
     tree = ET.ElementTree(root)
     tree.write("schweiger_jobs.xml", encoding="utf-8", xml_declaration=True)
     print("✅ XML feed generated successfully as 'schweiger_jobs.xml'")
 
 # -------------------------------------------------------
-# Main execution
+# Run
 # -------------------------------------------------------
 if __name__ == "__main__":
     generate_xml()
