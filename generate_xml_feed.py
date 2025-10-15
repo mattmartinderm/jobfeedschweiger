@@ -5,10 +5,8 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 
 # -------------------------------------------------------
-# Clean & format the job description text
-# -------------------------------------------------------
 def format_text_description(raw_html):
-    """Convert HTML to clean, structured plain text with readable formatting."""
+    """Convert HTML to readable plain text with line breaks and bullet points."""
     import math
     if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
         return ""
@@ -16,57 +14,44 @@ def format_text_description(raw_html):
     raw_html = str(raw_html)
     soup = BeautifulSoup(raw_html, "html.parser")
 
-    # Replace anchor tags with plain text (keep URL in parentheses)
+    # Replace <a> with text + (URL)
     for a in soup.find_all("a"):
-        link_text = a.get_text(" ", strip=True)
+        text = a.get_text(" ", strip=True)
         href = a.get("href", "")
-        if href:
-            a.replace_with(f"{link_text} ({href})")
-        else:
-            a.replace_with(link_text)
+        a.replace_with(f"{text} ({href})" if href else text)
 
-    # Add bullets and indentation for <li> tags (nested list support)
+    # Convert <li> into line-bulleted items
     for li in soup.find_all("li"):
-        depth = 0
-        parent = li.parent
-        while parent and parent.name == "ul":
-            depth += 1
-            parent = parent.parent
-        indent = "  " * (depth - 1) if depth > 1 else ""
-        li.insert_before(f"\n{indent}• ")
+        li.insert_before("\n• ")
         li.insert_after("\n")
 
-    # Add spacing before/after paragraphs and lists
-    for tag in soup.find_all(["p", "div", "ul", "br"]):
+    # Add blank lines between paragraphs, headers, and sections
+    for tag in soup.find_all(["p", "div", "ul", "ol", "br", "h1", "h2", "h3"]):
         tag.insert_before("\n")
         tag.insert_after("\n")
 
-    text = soup.get_text(" ", strip=True)
+    # Get raw text and clean up
+    text = soup.get_text(separator=" ", strip=True)
     text = html.unescape(text)
 
-    # Clean up spacing inside parentheses
-    text = re.sub(r"\(\s+", "(", text)
-    text = re.sub(r"\s+\)", ")", text)
+    # Replace multiple spaces and punctuation issues
+    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"(\S)\s*•", r"\1\n•", text)  # Start bullets on new lines
+    text = re.sub(r"(\.)([A-Z])", r"\1\n\n\2", text)  # Paragraph spacing
+    text = re.sub(r"\n{3,}", "\n\n", text)  # Limit blank lines
+    text = re.sub(r"\n\s+", "\n", text)  # Trim line starts
 
-    # Bold key section headers
+    # Add line breaks before key section headers
     headers = [
         "Schweiger Dermatology Group's Ultimate Employee Experience",
         "Job Summary:", "Schedule:", "Travel:", "Essential Functions:",
         "Qualifications:", "Hourly Pay Range", "Salary Range"
     ]
     for header in headers:
-        text = re.sub(fr"\s*{header}", f"\n\n**{header}**", text)
-
-    # Add spacing before bullets for clear separation
-    text = re.sub(r"(\S)\s*•", r"\1\n•", text)
-
-    # Normalize multiple newlines to max 2
-    text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # Clean stray spaces at line starts
-    text = re.sub(r"\n\s+", "\n", text)
+        text = re.sub(fr"\s*{header}", f"\n\n{header}\n", text)
 
     return text.strip()
+
 
 # -------------------------------------------------------
 # Generate XML feed
