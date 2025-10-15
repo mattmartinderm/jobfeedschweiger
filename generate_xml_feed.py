@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 # format text 
 # -------------------------------------------------------
 def format_text_description(raw_html):
-    """Convert HTML to clean, readable plain text with proper bullet indentation."""
+    """Convert HTML to clean, readable plain text with proper bullet indentation and spacing."""
     import math
     if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
         return ""
@@ -22,12 +22,12 @@ def format_text_description(raw_html):
         href = a.get("href", "")
         a.replace_with(f"{text} ({href})" if href else text)
 
-    # Add line breaks around block-level tags
+    # Add newlines around structural tags
     for tag in soup.find_all(["p", "div", "br", "ul", "ol", "h1", "h2", "h3"]):
         tag.insert_before("\n")
         tag.insert_after("\n")
 
-    # Handle bullets with nesting indentation
+    # Handle bullet points with indentation for nested lists
     for li in soup.find_all("li"):
         indent = ""
         parent = li.parent
@@ -37,17 +37,19 @@ def format_text_description(raw_html):
         li.insert_before(f"\n{indent}• ")
         li.insert_after("\n")
 
+    # Extract text and clean up
     text = soup.get_text(" ", strip=True)
     text = html.unescape(text)
 
-    # Normalize whitespace and punctuation
+    # Normalize spaces and punctuation
     text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"(\S)\s*•", r"\1\n•", text)
-    text = re.sub(r"(•\s*)+", "• ", text)
-    text = re.sub(r"\.\s+(?=[A-Z])", ".\n\n", text)
+    text = re.sub(r"(•\s*)+", "• ", text)  # Remove duplicate bullets
+    text = re.sub(r"\s*•\s*", r"\n• ", text)  # Ensure bullet starts on new line
+    text = re.sub(r"\n\s*•", r"\n•", text)  # Clean up spaces before bullets
+    text = re.sub(r"\.\s+(?=[A-Z])", ".\n\n", text)  # Break paragraphs naturally
     text = re.sub(r":(?=\S)", ": ", text)
 
-    # Insert spacing before major headers
+    # Add extra blank lines before section headers
     headers = [
         "Schweiger Dermatology Group's Ultimate Employee Experience",
         "Job Summary", "Schedule", "Travel", "Essential Functions",
@@ -56,12 +58,14 @@ def format_text_description(raw_html):
     for header in headers:
         text = re.sub(fr"\s*{header}\s*:", f"\n\n{header}:\n", text)
 
-    # Reduce excess line breaks and tidy up
+    # Fix double-bulleted or crammed lines
+    text = re.sub(r"• ([^•]+) •", r"• \1\n• ", text)
+
+    # Normalize blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = text.strip()
 
     return text
-
 
 # -------------------------------------------------------
 # Generate XML feed
