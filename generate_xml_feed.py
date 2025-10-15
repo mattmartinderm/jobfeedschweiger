@@ -5,8 +5,10 @@ from bs4 import BeautifulSoup
 import xml.etree.ElementTree as ET
 
 # -------------------------------------------------------
+# format text 
+# -------------------------------------------------------
 def format_text_description(raw_html):
-    """Convert HTML to readable plain text with line breaks and bullet points."""
+    """Convert HTML to well-structured plain text with natural line breaks and clean bullet spacing."""
     import math
     if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
         return ""
@@ -14,44 +16,54 @@ def format_text_description(raw_html):
     raw_html = str(raw_html)
     soup = BeautifulSoup(raw_html, "html.parser")
 
-    # Replace <a> with text + (URL)
+    # Replace <a> tags with "text (url)"
     for a in soup.find_all("a"):
         text = a.get_text(" ", strip=True)
         href = a.get("href", "")
         a.replace_with(f"{text} ({href})" if href else text)
 
-    # Convert <li> into line-bulleted items
+    # Add bullet markers and newlines for lists
     for li in soup.find_all("li"):
         li.insert_before("\n• ")
         li.insert_after("\n")
 
-    # Add blank lines between paragraphs, headers, and sections
+    # Add spacing before and after paragraphs and lists
     for tag in soup.find_all(["p", "div", "ul", "ol", "br", "h1", "h2", "h3"]):
         tag.insert_before("\n")
         tag.insert_after("\n")
 
-    # Get raw text and clean up
     text = soup.get_text(separator=" ", strip=True)
     text = html.unescape(text)
 
-    # Replace multiple spaces and punctuation issues
+    # Collapse extra spaces
     text = re.sub(r"\s+", " ", text)
-    text = re.sub(r"(\S)\s*•", r"\1\n•", text)  # Start bullets on new lines
-    text = re.sub(r"(\.)([A-Z])", r"\1\n\n\2", text)  # Paragraph spacing
-    text = re.sub(r"\n{3,}", "\n\n", text)  # Limit blank lines
-    text = re.sub(r"\n\s+", "\n", text)  # Trim line starts
 
-    # Add line breaks before key section headers
+    # Ensure single bullet per line
+    text = re.sub(r"(•\s*)+", "• ", text)
+
+    # Add newlines before bullets
+    text = re.sub(r"(\S)\s*•", r"\1\n•", text)
+
+    # Add double newlines after sentences ending in a period followed by uppercase
+    text = re.sub(r"\.\s+(?=[A-Z])", ".\n\n", text)
+
+    # Ensure space after colons
+    text = re.sub(r":(?=\S)", ": ", text)
+
+    # Add blank lines before section headers
     headers = [
         "Schweiger Dermatology Group's Ultimate Employee Experience",
-        "Job Summary:", "Schedule:", "Travel:", "Essential Functions:",
-        "Qualifications:", "Hourly Pay Range", "Salary Range"
+        "Job Summary", "Schedule", "Travel", "Essential Functions",
+        "Qualifications", "Hourly Pay Range", "Salary Range"
     ]
     for header in headers:
-        text = re.sub(fr"\s*{header}", f"\n\n{header}\n", text)
+        text = re.sub(fr"\s*{header}\s*:", f"\n\n{header}:\n", text)
 
-    return text.strip()
+    # Normalize extra blank lines
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = text.strip()
 
+    return text
 
 # -------------------------------------------------------
 # Generate XML feed
