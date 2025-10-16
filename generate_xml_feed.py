@@ -7,7 +7,7 @@ import xml.etree.ElementTree as ET
 # -------------------------------------------------------
 # format text 
 # -------------------------------------------------------
-def format_html_description(raw_html):
+description_clean = format_html_description(description_raw)
     """Clean HTML but preserve structure for jBoard rendering."""
     import math
     if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
