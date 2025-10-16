@@ -1,104 +1,97 @@
 import pandas as pd
+from bs4 import BeautifulSoup
 import html
 import re
-from bs4 import BeautifulSoup
-import xml.etree.ElementTree as ET
+import os
 
-# -------------------------------------------------------
-# format text 
-# -------------------------------------------------------
-description_clean = format_html_description(description_raw)
-    """Clean HTML but preserve structure for jBoard rendering."""
-    import math
-    if not raw_html or (isinstance(raw_html, float) and math.isnan(raw_html)):
+def format_html_description(raw_html):
+    """Clean and simplify HTML for JBoard rendering."""
+    if not isinstance(raw_html, str) or not raw_html.strip():
         return ""
 
-    soup = BeautifulSoup(str(raw_html), "html.parser")
+    soup = BeautifulSoup(raw_html, "html.parser")
 
-    # Remove unwanted containers, scripts, or styling
-    for tag in soup(["script", "style", "meta", "iframe"]):
+    # Remove unnecessary tags
+    for tag in soup(["script", "style"]):
         tag.decompose()
 
-    # Fix <a> links to show text + clickable URL
-    for a in soup.find_all("a"):
-        text = a.get_text(" ", strip=True)
-        href = a.get("href", "")
-        if href:
-            a.replace_with(BeautifulSoup(f'<a href="{href}" target="_blank">{text}</a>', "html.parser"))
-        else:
-            a.replace_with(text)
-
-    # Normalize <div> and <span> as <p> when they contain text
-    for div in soup.find_all("div"):
-        if div.get_text(strip=True):
-            div.name = "p"
-    for span in soup.find_all("span"):
-        if span.get_text(strip=True):
-            span.unwrap()
-
-    # Replace <br> and empty <p> with real line breaks
+    # Ensure line breaks render properly
     for br in soup.find_all("br"):
-        br.replace_with(BeautifulSoup("<br/>", "html.parser"))
+        br.replace_with("<br/>")
 
-    # Simplify list formatting (ensure <ul> and <li> are well-structured)
+    # Clean up nested tags and normalize structure
+    for tag in soup.find_all(["div", "span", "section"]):
+        tag.unwrap()
+
+    # Ensure paragraphs wrap text properly
+    for p in soup.find_all("p"):
+        p.attrs = {}
+
+    # Clean list formatting
     for ul in soup.find_all("ul"):
-        ul.attrs = {}
+        ul.attrs = {"style": "margin-left:15px;"}
     for li in soup.find_all("li"):
         li.attrs = {}
 
-    # Keep only the safe tags
-    allowed_tags = {"p", "br", "ul", "ol", "li", "strong", "em", "b", "i", "a"}
-    for tag in soup.find_all(True):
-        if tag.name not in allowed_tags:
-            tag.unwrap()
+    # Convert <b>, <strong>, <i>, etc. to clean equivalents
+    for tag in soup.find_all(["b", "strong"]):
+        tag.name = "strong"
+    for tag in soup.find_all(["i", "em"]):
+        tag.name = "em"
 
-    # Convert to clean HTML
-    cleaned_html = str(soup)
-    cleaned_html = cleaned_html.replace("\n", "").strip()
+    # Clean up whitespace
+    html_output = str(soup)
+    html_output = re.sub(r"\s*\n\s*", " ", html_output)
+    html_output = re.sub(r"\s{2,}", " ", html_output).strip()
 
-    return cleaned_html
+    # Wrap in <p> if plain text only
+    if not any(tag in html_output for tag in ["<p", "<ul", "<li", "<br"]):
+        html_output = f"<p>{html.escape(html_output)}</p>"
+
+    return html_output
 
 
-# -------------------------------------------------------
-# Generate XML feed
-# -------------------------------------------------------
 def generate_xml():
-    print("🧩 Generating XML feed with professional formatting...")
+    print("🧩 Generating XML feed with clean HTML formatting...")
 
-    # Load CSV
-    df = pd.read_csv("workday_jobs_full.csv")
+    csv_path = "workday_jobs_full.csv"
+    output_path = "schweiger_jobs.xml"
 
-    root = ET.Element("jobs")
+    if not os.path.exists(csv_path):
+        print(f"❌ CSV file not found: {csv_path}")
+        return
 
-    for _, row in df.iterrows():
-        job = ET.SubElement(root, "job")
+    df = pd.read_csv(csv_path)
 
-        # Match CSV headers exactly
-        ET.SubElement(job, "jobid").text = str(row.get("jobid", "")).strip()
-        ET.SubElement(job, "title").text = str(row.get("title", "")).strip()
-        ET.SubElement(job, "location").text = str(row.get("location", "")).replace("locations", "").strip()
-        ET.SubElement(job, "time_type").text = str(row.get("time_type", "N/A")).strip()
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write('<?xml version="1.0" encoding="UTF-8"?>\n')
+        f.write("<jobs>\n")
 
-        # Remove "posted" from the posted_on field
-        posted_clean = str(row.get("posted_on", "")).replace("posted on", "").replace("Posted", "").strip()
-        ET.SubElement(job, "posted_on").text = posted_clean
+        for _, row in df.iterrows():
+            jobid = html.escape(str(row.get("jobid", "")).strip())
+            title = html.escape(str(row.get("title", "")).strip())
+            location = html.escape(str(row.get("location", "")).replace("locations ", "").strip())
+            time_type = html.escape(str(row.get("time_type", "")).strip())
+            posted_on = html.escape(str(row.get("posted_on", "")).replace("posted on ", "").strip())
+            job_link = html.escape(str(row.get("job_link", "")).strip())
+            description_raw = row.get("description", "")
 
-        ET.SubElement(job, "job_link").text = str(row.get("job_link", "")).strip()
+            description_clean = format_html_description(description_raw)
 
-        # Clean and format description
-        description_raw = row.get("description", "")
-        description_clean = format_text_description(description_raw)
+            f.write("  <job>\n")
+            f.write(f"    <jobid>{jobid}</jobid>\n")
+            f.write(f"    <title>{title}</title>\n")
+            f.write(f"    <location>{location}</location>\n")
+            f.write(f"    <time_type>{time_type}</time_type>\n")
+            f.write(f"    <posted_on>{posted_on}</posted_on>\n")
+            f.write(f"    <job_link>{job_link}</job_link>\n")
+            f.write(f"    <description><![CDATA[{description_clean}]]></description>\n")
+            f.write("  </job>\n")
 
-        desc_element = ET.SubElement(job, "description")
-        desc_element.text = f"<![CDATA[{description_clean}]]>"
+        f.write("</jobs>\n")
 
-    # Write final XML
-    tree = ET.ElementTree(root)
-    tree.write("schweiger_jobs.xml", encoding="utf-8", xml_declaration=True)
-    print("✅ XML feed generated successfully as 'schweiger_jobs.xml'")
+    print(f"✅ XML feed created: {output_path} with {len(df)} jobs.")
 
-# -------------------------------------------------------
-# Run
-# -------------------------------------------------------
+
 if __name__ == "__main__":
     generate_xml()
